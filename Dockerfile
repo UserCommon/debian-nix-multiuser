@@ -8,7 +8,10 @@ RUN apt-get update && apt-get install -y \
     sudo \
     ca-certificates \
     locales \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-bundle.crt
 
 # --- UTF-8 locales (ru + en) ---
 RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && \
