@@ -30,10 +30,13 @@ ENV NIX_PATH="/nix/var/nix/profiles/per-user/root/channels"
 RUN mkdir -p /etc/nix && \
     echo "experimental-features = nix-command flakes" > /etc/nix/nix.conf
 
-# --- Create unprivileged user ---
-RUN useradd -m -s /bin/bash user && \
+
+# --- Create unprivileged user with UID:GID = 1000:1000 ---
+RUN groupadd -g 1000 user && \
+    useradd -m -u 1000 -g 1000 -s /bin/bash user && \
     usermod -aG nixbld user && \
     echo "user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
 
 # --- Prepare per-user and daemon paths ---
 RUN mkdir -p \
