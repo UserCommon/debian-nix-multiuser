@@ -1,80 +1,32 @@
 FROM debian:bookworm-slim
 
-# --- Install dependencies and locales ---
-RUN apt-get update && apt-get install -y \
+# Update package list and install required dependencies
+RUN apt-get update && \
+    apt-get install -y \
     curl \
     xz-utils \
-    git \
     sudo \
-    ca-certificates \
-    locales \
-    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-RUN ln -sf /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-bundle.crt
+# Create a user with UID 1000 and GID 1000
+RUN groupadd -g 1000 nixuser && \
+    useradd -m -u 1000 -g 1000 -s /bin/bash nixuser && \
+    echo "nixuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# --- UTF-8 locales (ru + en) ---
-RUN sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && \
-    sed -i '/ru_RU.UTF-8/s/^# //g' /etc/locale.gen && \
-    locale-gen en_US.UTF-8 ru_RU.UTF-8 && \
-    update-locale LANG=ru_RU.UTF-8 LC_ALL=ru_RU.UTF-8
+# Switch to the new user
+USER nixuser
+WORKDIR /home/nixuser
 
-ENV LANG=ru_RU.UTF-8 \
-    LC_ALL=ru_RU.UTF-8 \
-    LANGUAGE=ru_RU:ru \
-    LC_CTYPE=ru_RU.UTF-8
+# Install Nix package manager (single-user installation)
+RUN curl -L https://nixos.org/nix/install | sh -s -- --no-daemon
 
-# --- Install Nix in multi-user mode ---
-RUN curl --proto '=https' --tlsv1.2 -sSfL https://nixos.org/nix/install | sh -s -- --daemon
+# Configure environment for Nix
+ENV PATH="/home/nixuser/.nix-profile/bin:${PATH}"
+RUN echo '. /home/nixuser/.nix-profile/etc/profile.d/nix.sh' >> /home/nixuser/.bashrc
 
-ENV PATH="/nix/var/nix/profiles/default/bin:${PATH}"
-ENV NIX_PATH="/nix/var/nix/profiles/per-user/root/channels"
+# Enable experimental features (nix-command and flakes)
+RUN mkdir -p /home/nixuser/.config/nix && \
+    echo "experimental-features = nix-command flakes" > /home/nixuser/.config/nix/nix.conf
 
-RUN mkdir -p /etc/nix && \
-    echo "experimental-features = nix-command flakes" > /etc/nix/nix.conf
-
-
-# --- Create unprivileged user with UID:GID = 1000:1000 ---
-RUN groupadd -g 1000 user && \
-    useradd -m -u 1000 -g 1000 -s /bin/bash user && \
-    usermod -aG nixbld user && \
-    echo "user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
-
-
-# --- Prepare per-user and daemon paths ---
-RUN mkdir -p \
-    /nix/var/nix/daemon-socket \
-    /nix/var/nix/profiles/per-user/user \
-    /nix/var/nix/gcroots/per-user/user && \
-    chown -R user:nixbld /nix/var/nix && \
-    chmod -R 775 /nix/var/nix/daemon-socket && \
-    chmod -R 775 /nix/var/nix/profiles/per-user/user && \
-    chmod -R 775 /nix/var/nix/gcroots/per-user/user
-
-# --- Optional: ensure nix-daemon service file exists (some Nix versions miss it) ---
-RUN mkdir -p /etc/systemd/system && \
-    ln -sf /nix/var/nix/profiles/default/lib/systemd/system/nix-daemon.service \
-    /etc/systemd/system/nix-daemon.service || true
-
-# --- ENTRYPOINT ---
-COPY <<'EOF' /usr/local/bin/start-nix-daemon
-#!/usr/bin/env bash
-set -euo pipefail
-
-echo "[entrypoint] Starting Nix daemon as root..."
-/nix/var/nix/profiles/default/bin/nix-daemon & disown
-
-# Give the daemon time to initialize
-sleep 2
-
-echo "[entrypoint] Nix daemon started successfully."
-echo "[entrypoint] You are root. Nix is ready for both root and user sessions."
-
-exec "$@"
-EOF
-
-RUN chmod +x /usr/local/bin/start-nix-daemon
-
-# --- Default: stay as root, but nix works for all users ---
-ENTRYPOINT ["/usr/local/bin/start-nix-daemon"]
+# Set default command
 CMD ["/bin/bash"]
